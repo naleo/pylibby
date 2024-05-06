@@ -27,6 +27,7 @@ import dicttoxml
 import html
 import time
 import re
+from bs4 import BeautifulSoup
 from mutagen.mp3 import MP3
 from mutagen.id3 import TXXX, TPE1, TIT2, TIT3, TPUB, TYER, TCOM, TCON, TALB, TDRL, COMM
 from typing import Callable
@@ -168,20 +169,24 @@ class Libby:
         url = f"https://sentry-read.svc.overdrive.com/open/{'audiobook' if loan['type']['id'] == 'audiobook' else 'book'}/card/{card_id}/title/{title_id}"
         audiobook = self.http_session.get(url).json()
         message = audiobook["message"]
-        openbook_url = audiobook["urls"]["openbook"]
+#        openbook_url = audiobook["urls"]["openbook"]
 
         #THIS IS IMPORTANT
         old_headers = self.http_session.headers
         self.http_session.headers = None
         #We need this to set a cookie for us
         web_url_with_message = audiobook["urls"]["web"] + "?" + message
-        self.http_session.get(web_url_with_message)
+        web_url = self.http_session.get(web_url_with_message)
+        soup = BeautifulSoup(web_url.text, 'html.parser')
+        script_tag = soup.find('script')
+        openbook_data = script_tag.string.split('\n')[2].split('window.bData = ')[1].strip(';')
+        json_openbook_data = json.loads(openbook_data)
 
         self.http_session.headers = old_headers
 
         return {
                 "audiobook_urls": audiobook,
-                "openbook":  self.http_session.get(openbook_url).json(),
+                "openbook":  json_openbook_data,
                 "media_info": self.get_media_info(title_id)
                 }
 
@@ -308,7 +313,7 @@ class Libby:
                     self.embed_tag_data(os.path.join(final_path, filename), "<Markers><Marker><Name>(continued)</Name><Time>0:00.000</Time></Marker></Markers>", audiobook_info)
                     print("no toc to embed, generated (continued) chapter marker, and embedded it.")
 
-            time.sleep(random.random() * 2)
+            time.sleep(random.random() * 5)
 
         if save_info:
             with open(os.path.join(final_path, "info.json"), "w") as w:
@@ -429,7 +434,7 @@ class Libby:
         format_is_available = any(f for f in loan["formats"] if f["id"] == format_id)
         if format_is_available:
             url = f"https://sentry-read.svc.overdrive.com/card/{loan['cardId']}/loan/{loan['id']}/fulfill/{format_id}"
-            if format_id == "audiobook-mp3":
+            if format_id == "audiobook-mp3" or format_id == "audiobook-overdrive":
                 if get_odm:
                     download_path = ""
                     if format_string is not None:
